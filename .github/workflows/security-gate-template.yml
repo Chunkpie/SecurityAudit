@@ -1,0 +1,89 @@
+name: SecAudit Security Gate
+
+# Copy this workflow into YOUR project's .github/workflows/ directory
+# to block deployments that fail the security audit.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  SECAUDIT_API_URL: ${{ secrets.SECAUDIT_API_URL }}
+  SECAUDIT_API_KEY: ${{ secrets.SECAUDIT_API_KEY }}
+  TARGET_URL: ${{ secrets.STAGING_URL }}
+
+jobs:
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Security Scan
+        id: scan
+        run: |
+          RESPONSE=$(curl -s -X POST "${SECAUDIT_API_URL}/api/v1/scans/" \
+            -H "X-API-Key: ${SECAUDIT_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"target_url\": \"${TARGET_URL}\",
+              \"scan_type\": \"full\",
+              \"organization_id\": \"${{ secrets.SECAUDIT_ORG_ID }}\",
+              \"consent_confirmed\": true
+            }")
+          SCAN_ID=$(echo "$RESPONSE" | jq -r '.id')
+          echo "scan_id=$SCAN_ID" >> "$GITHUB_OUTPUT"
+          echo "Scan started: $SCAN_ID"
+
+      - name: Wait for Scan Completion
+        id: wait
+        run: |
+          SCAN_ID="${{ steps.scan.outputs.scan_id }}"
+          for i in $(seq 1 60); do
+            STATUS=$(curl -s "${SECAUDIT_API_URL}/api/v1/scans/${SCAN_ID}" \
+              -H "X-API-Key: ${SECAUDIT_API_KEY}" | jq -r '.status')
+            echo "Scan status: $STATUS (attempt $i/60)"
+            if [ "$STATUS" = "completed" ] || [ "$STATUS" = "failed" ]; then
+              break
+            fi
+            sleep 30
+          done
+
+      - name: Check Deployment Gate
+        id: gate
+        run: |
+          SCAN_ID="${{ steps.scan.outputs.scan_id }}"
+          GATE=$(curl -s "${SECAUDIT_API_URL}/api/v1/cicd/gate/${SCAN_ID}" \
+            -H "X-API-Key: ${SECAUDIT_API_KEY}")
+
+          echo "$GATE" | jq .
+
+          STATUS=$(echo "$GATE" | jq -r '.status')
+          SCORE=$(echo "$GATE" | jq -r '.security_score')
+          CRITICAL=$(echo "$GATE" | jq -r '.critical_findings')
+          HIGH=$(echo "$GATE" | jq -r '.high_findings')
+          PASSED=$(echo "$GATE" | jq -r '.passed')
+
+          echo "## 🛡️ Security Audit Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Verdict | **${STATUS}** |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Security Score | ${SCORE}/100 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Critical Findings | ${CRITICAL} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| High Findings | ${HIGH} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Full Report | [View Scan](${SECAUDIT_API_URL}/dashboard/scans/${SCAN_ID}) |" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$PASSED" != "true" ]; then
+            echo "::error::Deployment blocked. Security verdict: $STATUS"
+            exit 1
+          fi
+          echo "✅ Security gate passed: $STATUS"
+
+  deploy:
+    needs: security-audit
+    runs-on: ubuntu-latest
+    if: success()
+    steps:
+      - name: Deploy
+        run: echo "Deployment proceeds — security gate passed."

@@ -1,0 +1,46 @@
+# Copy this into YOUR project's .gitlab-ci.yml to add a security gate.
+
+stages:
+  - security-audit
+  - deploy
+
+security_audit:
+  stage: security-audit
+  image: curlimages/curl:latest
+  variables:
+    TARGET_URL: $STAGING_URL
+  before_script:
+    - apk add --no-cache jq
+  script:
+    - |
+      RESPONSE=$(curl -s -X POST "${SECAUDIT_API_URL}/api/v1/scans/" \
+        -H "X-API-Key: ${SECAUDIT_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"target_url\": \"${TARGET_URL}\", \"scan_type\": \"full\", \"organization_id\": \"${SECAUDIT_ORG_ID}\", \"consent_confirmed\": true}")
+      SCAN_ID=$(echo "$RESPONSE" | jq -r '.id')
+      echo "SCAN_ID=$SCAN_ID" >> scan.env
+
+      for i in $(seq 1 60); do
+        STATUS=$(curl -s "${SECAUDIT_API_URL}/api/v1/scans/${SCAN_ID}" -H "X-API-Key: ${SECAUDIT_API_KEY}" | jq -r '.status')
+        if [ "$STATUS" = "completed" ] || [ "$STATUS" = "failed" ]; then break; fi
+        sleep 30
+      done
+
+      GATE=$(curl -s "${SECAUDIT_API_URL}/api/v1/cicd/gate/${SCAN_ID}" -H "X-API-Key: ${SECAUDIT_API_KEY}")
+      echo "$GATE" | jq .
+      PASSED=$(echo "$GATE" | jq -r '.passed')
+      if [ "$PASSED" != "true" ]; then
+        echo "Deployment blocked by security gate."
+        exit 1
+      fi
+  artifacts:
+    reports:
+      dotenv: scan.env
+
+deploy_production:
+  stage: deploy
+  script:
+    - echo "Deploying — security gate passed"
+  needs: ["security_audit"]
+  only:
+    - main

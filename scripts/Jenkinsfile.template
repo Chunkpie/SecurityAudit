@@ -1,0 +1,55 @@
+// Copy into your Jenkinsfile to add a SecAudit security gate stage.
+
+pipeline {
+    agent any
+
+    environment {
+        SECAUDIT_API_URL = credentials('secaudit-api-url')
+        SECAUDIT_API_KEY = credentials('secaudit-api-key')
+        SECAUDIT_ORG_ID  = credentials('secaudit-org-id')
+        TARGET_URL       = "${env.STAGING_URL}"
+    }
+
+    stages {
+        stage('Security Audit') {
+            steps {
+                script {
+                    def response = sh(script: """
+                        curl -s -X POST "${SECAUDIT_API_URL}/api/v1/scans/" \
+                          -H "X-API-Key: ${SECAUDIT_API_KEY}" \
+                          -H "Content-Type: application/json" \
+                          -d '{"target_url": "${TARGET_URL}", "scan_type": "full", "organization_id": "${SECAUDIT_ORG_ID}", "consent_confirmed": true}'
+                    """, returnStdout: true).trim()
+
+                    def scanId = sh(script: "echo '${response}' | jq -r '.id'", returnStdout: true).trim()
+                    echo "Scan started: ${scanId}"
+
+                    timeout(time: 30, unit: 'MINUTES') {
+                        waitUntil {
+                            def status = sh(script: """
+                                curl -s "${SECAUDIT_API_URL}/api/v1/scans/${scanId}" -H "X-API-Key: ${SECAUDIT_API_KEY}" | jq -r '.status'
+                            """, returnStdout: true).trim()
+                            return (status == 'completed' || status == 'failed')
+                        }
+                    }
+
+                    def gate = sh(script: """
+                        curl -s "${SECAUDIT_API_URL}/api/v1/cicd/gate/${scanId}" -H "X-API-Key: ${SECAUDIT_API_KEY}"
+                    """, returnStdout: true).trim()
+                    echo gate
+
+                    def passed = sh(script: "echo '${gate}' | jq -r '.passed'", returnStdout: true).trim()
+                    if (passed != 'true') {
+                        error("Deployment blocked by security gate.")
+                    }
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo 'Deploying — security gate passed.'
+            }
+        }
+    }
+}
