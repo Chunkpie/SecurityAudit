@@ -16,6 +16,7 @@ scrape_configs:
     static_configs:
       - targets: ['redis:6379']
 
-  - job_name: 'postgres'
-    static_configs:
-      - targets: ['postgres:5432']
+# Note: scraping Postgres directly on 5432 will send HTTP requests to the Postgres TCP
+# port and generate 'invalid length of startup packet' logs in Postgres. Remove or
+# replace this scrape with a PostgreSQL exporter endpoint (e.g. postgres_exporter:9187)
+# if you add one.

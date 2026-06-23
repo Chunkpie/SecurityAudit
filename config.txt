@@ -1,0 +1,368 @@
+name: secaudit
+services:
+  api:
+    build:
+      context: D:\secauditv3\secaudit\secaudit\backend
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+      redis:
+        condition: service_healthy
+        required: true
+    environment:
+      ALLOWED_ORIGINS: '["http://localhost:3000","http://localhost:80","https://localhost"]'
+      DOMAIN: localhost
+      EMAILS_FROM_EMAIL: noreply@secaudit.local
+      ENVIRONMENT: production
+      GRAFANA_PASSWORD: changeme
+      JWT_SECRET_KEY: 5mrBvLVk7SVc-e4n2pcp79oAeDCVeJrwjN2As-Zkm2apy6UpqW54YlVdKHSIWw1d4u6i1rnRXMmgCdB_E593CQ
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      OLLAMA_ENABLED: "false"
+      OLLAMA_MODEL: llama3
+      OLLAMA_URL: http://localhost:11434
+      POSTGRES_DB: secaudit
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: Feizan393001
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: secaudit
+      REDIS_DB: "0"
+      REDIS_HOST: redis
+      REDIS_PASSWORD: Feizan@393001
+      REDIS_PORT: "6379"
+      REPORTS_DIR: /app/reports
+      SECRET_KEY: UIdYSnxDbaszmNhD79Q5kAH3QJ1sP8b3ewv7puA4bxqsA2N4CPU1yDoX-xbjawk4qnYyG72vIdK485kC4AwfDA
+      SMTP_HOST: ""
+      SMTP_PASSWORD: ""
+      SMTP_PORT: "587"
+      SMTP_USER: ""
+      UPLOADS_DIR: /app/uploads
+    networks:
+      secaudit: null
+    ports:
+      - mode: ingress
+        target: 8000
+        published: "8000"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: volume
+        source: reports
+        target: /app/reports
+        volume: {}
+      - type: volume
+        source: uploads
+        target: /app/uploads
+        volume: {}
+      - type: volume
+        source: screenshots
+        target: /app/screenshots
+        volume: {}
+  beat:
+    build:
+      context: D:\secauditv3\secaudit\secaudit\backend
+      dockerfile: Dockerfile.worker
+    command:
+      - celery
+      - -A
+      - app.workers.tasks.celery_app
+      - beat
+      - --loglevel=info
+    depends_on:
+      redis:
+        condition: service_started
+        required: true
+    environment:
+      DOMAIN: localhost
+      EMAILS_FROM_EMAIL: noreply@secaudit.local
+      ENVIRONMENT: production
+      GRAFANA_PASSWORD: changeme
+      JWT_SECRET_KEY: 5mrBvLVk7SVc-e4n2pcp79oAeDCVeJrwjN2As-Zkm2apy6UpqW54YlVdKHSIWw1d4u6i1rnRXMmgCdB_E593CQ
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      OLLAMA_ENABLED: "false"
+      OLLAMA_MODEL: llama3
+      OLLAMA_URL: http://localhost:11434
+      POSTGRES_DB: secaudit
+      POSTGRES_PASSWORD: Feizan393001
+      POSTGRES_USER: secaudit
+      REDIS_DB: "0"
+      REDIS_HOST: redis
+      REDIS_PASSWORD: Feizan@393001
+      REDIS_PORT: "6379"
+      SECRET_KEY: UIdYSnxDbaszmNhD79Q5kAH3QJ1sP8b3ewv7puA4bxqsA2N4CPU1yDoX-xbjawk4qnYyG72vIdK485kC4AwfDA
+      SMTP_HOST: ""
+      SMTP_PASSWORD: ""
+      SMTP_PORT: "587"
+      SMTP_USER: ""
+    networks:
+      secaudit: null
+    restart: unless-stopped
+  frontend:
+    build:
+      context: D:\secauditv3\secaudit\secaudit\frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    networks:
+      secaudit: null
+    ports:
+      - mode: ingress
+        target: 3000
+        published: "3000"
+        protocol: tcp
+    restart: unless-stopped
+  grafana:
+    depends_on:
+      prometheus:
+        condition: service_started
+        required: true
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: changeme
+      GF_SERVER_ROOT_URL: http://localhost:3001
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    image: grafana/grafana:latest
+    networks:
+      secaudit: null
+    ports:
+      - mode: ingress
+        target: 3000
+        published: "3001"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: volume
+        source: grafana_data
+        target: /var/lib/grafana
+        volume: {}
+      - type: bind
+        source: D:\secauditv3\secaudit\secaudit\infrastructure\monitoring\grafana
+        target: /etc/grafana/provisioning
+        read_only: true
+        bind: {}
+  nginx:
+    depends_on:
+      api:
+        condition: service_started
+        required: true
+      frontend:
+        condition: service_started
+        required: true
+    image: nginx:alpine
+    networks:
+      secaudit: null
+    ports:
+      - mode: ingress
+        target: 80
+        published: "80"
+        protocol: tcp
+      - mode: ingress
+        target: 443
+        published: "443"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: D:\secauditv3\secaudit\secaudit\infrastructure\nginx\nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+        bind: {}
+      - type: bind
+        source: D:\secauditv3\secaudit\secaudit\infrastructure\nginx\conf.d
+        target: /etc/nginx/conf.d
+        read_only: true
+        bind: {}
+      - type: volume
+        source: nginx_certs
+        target: /etc/nginx/certs
+        volume: {}
+      - type: volume
+        source: reports
+        target: /app/reports
+        read_only: true
+        volume: {}
+  postgres:
+    environment:
+      DOMAIN: localhost
+      EMAILS_FROM_EMAIL: noreply@secaudit.local
+      ENVIRONMENT: production
+      GRAFANA_PASSWORD: changeme
+      JWT_SECRET_KEY: 5mrBvLVk7SVc-e4n2pcp79oAeDCVeJrwjN2As-Zkm2apy6UpqW54YlVdKHSIWw1d4u6i1rnRXMmgCdB_E593CQ
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      OLLAMA_ENABLED: "false"
+      OLLAMA_MODEL: llama3
+      OLLAMA_URL: http://localhost:11434
+      POSTGRES_DB: secaudit
+      POSTGRES_PASSWORD: Feizan393001
+      POSTGRES_USER: secaudit
+      REDIS_PASSWORD: Feizan393001
+      SECRET_KEY: UIdYSnxDbaszmNhD79Q5kAH3QJ1sP8b3ewv7puA4bxqsA2N4CPU1yDoX-xbjawk4qnYyG72vIdK485kC4AwfDA
+      SMTP_HOST: ""
+      SMTP_PASSWORD: ""
+      SMTP_PORT: "587"
+      SMTP_USER: ""
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U secaudit
+      timeout: 5s
+      interval: 10s
+      retries: 5
+    image: postgres:16-alpine
+    networks:
+      secaudit: null
+    restart: unless-stopped
+    volumes:
+      - type: volume
+        source: postgres_data
+        target: /var/lib/postgresql/data
+        volume: {}
+      - type: bind
+        source: D:\secauditv3\secaudit\secaudit\scripts\init.sql
+        target: /docker-entrypoint-initdb.d/init.sql
+        read_only: true
+        bind: {}
+  prometheus:
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+      - --storage.tsdb.retention.time=30d
+    image: prom/prometheus:latest
+    networks:
+      secaudit: null
+    ports:
+      - mode: ingress
+        target: 9090
+        published: "9090"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: D:\secauditv3\secaudit\secaudit\infrastructure\monitoring\prometheus\prometheus.yml
+        target: /etc/prometheus/prometheus.yml
+        read_only: true
+        bind: {}
+      - type: volume
+        source: prometheus_data
+        target: /prometheus
+        volume: {}
+  redis:
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - Feizan@393001
+    environment:
+      DOMAIN: localhost
+      EMAILS_FROM_EMAIL: noreply@secaudit.local
+      ENVIRONMENT: production
+      GRAFANA_PASSWORD: changeme
+      JWT_SECRET_KEY: 5mrBvLVk7SVc-e4n2pcp79oAeDCVeJrwjN2As-Zkm2apy6UpqW54YlVdKHSIWw1d4u6i1rnRXMmgCdB_E593CQ
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      OLLAMA_ENABLED: "false"
+      OLLAMA_MODEL: llama3
+      OLLAMA_URL: http://localhost:11434
+      POSTGRES_DB: secaudit
+      POSTGRES_PASSWORD: Feizan393001
+      POSTGRES_USER: secaudit
+      REDIS_PASSWORD: Feizan393001
+      SECRET_KEY: UIdYSnxDbaszmNhD79Q5kAH3QJ1sP8b3ewv7puA4bxqsA2N4CPU1yDoX-xbjawk4qnYyG72vIdK485kC4AwfDA
+      SMTP_HOST: ""
+      SMTP_PASSWORD: ""
+      SMTP_PORT: "587"
+      SMTP_USER: ""
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - if [ -n "$${REDIS_PASSWORD}" ]; then redis-cli -a "$${REDIS_PASSWORD}" ping; else redis-cli ping; fi
+      timeout: 3s
+      interval: 10s
+      retries: 5
+    image: redis:7-alpine
+    networks:
+      secaudit: null
+    restart: unless-stopped
+    volumes:
+      - type: volume
+        source: redis_data
+        target: /data
+        volume: {}
+  worker:
+    build:
+      context: D:\secauditv3\secaudit\secaudit\backend
+      dockerfile: Dockerfile.worker
+    cap_add:
+      - NET_ADMIN
+    command:
+      - celery
+      - -A
+      - app.workers.tasks.celery_app
+      - worker
+      - --loglevel=info
+      - -Q
+      - scans,reports
+      - -c
+      - "3"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+      redis:
+        condition: service_healthy
+        required: true
+    environment:
+      ENVIRONMENT: production
+      POSTGRES_DB: secaudit
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: Feizan393001
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: secaudit
+      REDIS_DB: "0"
+      REDIS_HOST: redis
+      REDIS_PASSWORD: Feizan@393001
+      REDIS_PORT: "6379"
+      REPORTS_DIR: /app/reports
+    networks:
+      secaudit: null
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: volume
+        source: reports
+        target: /app/reports
+        volume: {}
+      - type: volume
+        source: uploads
+        target: /app/uploads
+        volume: {}
+      - type: volume
+        source: screenshots
+        target: /app/screenshots
+        volume: {}
+networks:
+  secaudit:
+    name: secaudit_secaudit
+    driver: bridge
+volumes:
+  grafana_data:
+    name: secaudit_grafana_data
+  nginx_certs:
+    name: secaudit_nginx_certs
+  postgres_data:
+    name: secaudit_postgres_data
+  prometheus_data:
+    name: secaudit_prometheus_data
+  redis_data:
+    name: secaudit_redis_data
+  reports:
+    name: secaudit_reports
+  screenshots:
+    name: secaudit_screenshots
+  uploads:
+    name: secaudit_uploads

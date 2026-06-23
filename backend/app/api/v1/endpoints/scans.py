@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,7 +46,6 @@ async def verify_org_access(org_id: UUID, user: User, db: AsyncSession) -> Organ
 async def create_scan(
     scan_in: ScanCreate,
     request: Request,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -69,18 +68,18 @@ async def create_scan(
     db.add(scan)
     await db.flush()
 
-    # Queue the scan
-    background_tasks.add_task(queue_scan, str(scan.id))
+    try:
+        task = run_scan_task.delay(str(scan.id))
+        logger.info(f"Queued scan {scan.id} as task {task.id}")
+    except Exception as e:
+        logger.error(f"Failed to queue scan {scan.id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to queue scan task",
+        )
+
     logger.info(f"Scan created: {scan.id} for {scan.target_url}")
     return scan
-
-
-async def queue_scan(scan_id: str):
-    try:
-        task = run_scan_task.delay(scan_id)
-        logger.info(f"Queued scan {scan_id} as task {task.id}")
-    except Exception as e:
-        logger.error(f"Failed to queue scan {scan_id}: {e}")
 
 
 @router.get("/", response_model=ScanListResponse)

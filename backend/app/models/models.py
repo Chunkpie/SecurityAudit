@@ -107,7 +107,7 @@ class OrganizationMember(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    role: Mapped[UserRole] = mapped_column(SAEnum(UserRole), default=UserRole.MEMBER)
+    role: Mapped[UserRole] = mapped_column(SAEnum(UserRole, native_enum=False), default=UserRole.MEMBER)
     invited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -153,10 +153,10 @@ class Scan(Base):
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     target_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     target_domain: Mapped[str] = mapped_column(String(255), nullable=False)
-    scan_type: Mapped[ScanType] = mapped_column(SAEnum(ScanType), default=ScanType.FULL)
-    status: Mapped[ScanStatus] = mapped_column(SAEnum(ScanStatus), default=ScanStatus.PENDING, index=True)
+    scan_type: Mapped[ScanType] = mapped_column(SAEnum(ScanType, native_enum=False), default=ScanType.FULL)
+    status: Mapped[ScanStatus] = mapped_column(SAEnum(ScanStatus, native_enum=False), default=ScanStatus.PENDING, index=True)
     security_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    verdict: Mapped[Optional[DeploymentVerdict]] = mapped_column(SAEnum(DeploymentVerdict), nullable=True)
+    verdict: Mapped[Optional[DeploymentVerdict]] = mapped_column(SAEnum(DeploymentVerdict, native_enum=False), nullable=True)
     scan_config: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     scan_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -165,7 +165,7 @@ class Scan(Base):
     consent_timestamp: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     consent_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
     scheduled: Mapped[bool] = mapped_column(Boolean, default=False)
-    schedule_frequency: Mapped[Optional[ScheduleFrequency]] = mapped_column(SAEnum(ScheduleFrequency), nullable=True)
+    schedule_frequency: Mapped[Optional[ScheduleFrequency]] = mapped_column(SAEnum(ScheduleFrequency, native_enum=False), nullable=True)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -210,7 +210,7 @@ class Finding(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     scan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scans.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(500), nullable=False)
-    severity: Mapped[FindingSeverity] = mapped_column(SAEnum(FindingSeverity), nullable=False, index=True)
+    severity: Mapped[FindingSeverity] = mapped_column(SAEnum(FindingSeverity, native_enum=False), nullable=False, index=True)
     category: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     evidence: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
@@ -252,7 +252,10 @@ class Report(Base):
 
     scan: Mapped["Scan"] = relationship(back_populates="reports")
 
-    __table_args__ = (Index("idx_reports_scan", "scan_id"),)
+    __table_args__ = (
+        Index("idx_reports_scan", "scan_id"),
+        UniqueConstraint("scan_id", "report_type", name="uq_reports_scan_type"),
+    )
 
 
 class ApiKey(Base):

@@ -1,7 +1,10 @@
+import logging
 import secrets
 from typing import List, Optional
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -44,6 +47,18 @@ class Settings(BaseSettings):
         auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
         return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
 
+    @property
+    def REDIS_URL_REDACTED(self) -> str:
+        auth = ":***@" if self.REDIS_PASSWORD else ""
+        return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+
+    @property
+    def DATABASE_URL_REDACTED(self) -> str:
+        return (
+            f"postgresql+asyncpg://{self.POSTGRES_USER}:***"
+            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
+
     # JWT
     JWT_SECRET_KEY: str = secrets.token_urlsafe(64)
     JWT_ALGORITHM: str = "HS256"
@@ -59,8 +74,8 @@ class Settings(BaseSettings):
     SCREENSHOTS_DIR: str = "/app/screenshots"
 
     # Celery
-    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    CELERY_BROKER_URL: Optional[str] = None
+    CELERY_RESULT_BACKEND: Optional[str] = None
 
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 60
@@ -86,6 +101,39 @@ class Settings(BaseSettings):
     ENABLE_SUBDOMAIN_DISCOVERY: bool = True
     ENABLE_SOURCE_CODE_SCAN: bool = True
     ENABLE_SCHEDULED_SCANS: bool = True
+
+    @model_validator(mode="after")
+    def validate_celery_settings(self):
+        if self.CELERY_BROKER_URL is None:
+            self.CELERY_BROKER_URL = self.REDIS_URL
+        if self.CELERY_RESULT_BACKEND is None:
+            self.CELERY_RESULT_BACKEND = self.REDIS_URL
+
+        if "localhost" in self.REDIS_URL or "127.0.0.1" in self.REDIS_URL:
+            message = (
+                "Redis is configured to use localhost. In Docker this should use service name 'redis' instead. "
+                "Set REDIS_HOST=redis or CELERY_BROKER_URL/CELERY_RESULT_BACKEND to redis://redis:6379/0."
+            )
+            if self.ENVIRONMENT.lower() == "production":
+                raise ValueError(message)
+            logger.warning(message)
+
+        if "localhost" in (self.CELERY_BROKER_URL or "") or "127.0.0.1" in (self.CELERY_BROKER_URL or ""):
+            message = (
+                "Celery broker or backend is configured to use localhost. In Docker this should use service name 'redis'. "
+                "Set REDIS_HOST=redis or CELERY_BROKER_URL/CELERY_RESULT_BACKEND to redis://redis:6379/0."
+            )
+            if self.ENVIRONMENT.lower() == "production":
+                raise ValueError(message)
+            logger.warning(message)
+
+        if self.CELERY_BROKER_URL != self.CELERY_RESULT_BACKEND:
+            logger.info(
+                "Celery broker and result backend differ. broker=%s backend=%s",
+                self.CELERY_BROKER_URL,
+                self.CELERY_RESULT_BACKEND,
+            )
+        return self
 
     class Config:
         env_file = ".env"

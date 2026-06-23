@@ -20,6 +20,8 @@ celery_app = Celery(
     backend=settings.CELERY_RESULT_BACKEND,
 )
 
+logger.info("Celery worker config broker=%s backend=%s", settings.CELERY_BROKER_URL, settings.CELERY_RESULT_BACKEND)
+
 celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
@@ -29,6 +31,9 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    broker_connection_retry_on_startup=True,
+    broker_connection_retry=True,
+    broker_connection_max_retries=5,
     task_routes={
         "app.workers.tasks.run_scan_task": {"queue": "scans"},
         "app.workers.tasks.generate_report_task": {"queue": "reports"},
@@ -44,7 +49,7 @@ def get_sync_db():
     return SessionLocal()
 
 
-@celery_app.task(bind=True, name="run_scan_task", max_retries=2, soft_time_limit=3600)
+@celery_app.task(bind=True, name="app.workers.tasks.run_scan_task", max_retries=2, soft_time_limit=3600)
 def run_scan_task(self, scan_id: str):
     """Execute a full security scan."""
     logger.info(f"Starting scan task: {scan_id}")
@@ -127,7 +132,7 @@ def run_scan_task(self, scan_id: str):
         db.close()
 
 
-@celery_app.task(name="generate_report_task")
+@celery_app.task(name="app.workers.tasks.generate_report_task")
 def generate_report_task(scan_id: str, report_type: str = "pdf"):
     """Generate a report for a completed scan."""
     logger.info(f"Generating {report_type} report for scan {scan_id}")

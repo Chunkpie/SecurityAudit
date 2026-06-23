@@ -65,8 +65,10 @@ api.interceptors.response.use(
 );
 
 export function setAuth(accessToken: string, refreshToken: string) {
-  Cookies.set('access_token', accessToken, { secure: true, sameSite: 'strict', expires: 1 / 48 });
-  Cookies.set('refresh_token', refreshToken, { secure: true, sameSite: 'strict', expires: 7 });
+  const isSecure = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  // Use secure cookies only when served over HTTPS (production). Use lax sameSite for cross-site navigations.
+  Cookies.set('access_token', accessToken, { secure: isSecure, sameSite: 'lax', expires: 1 / 48 });
+  Cookies.set('refresh_token', refreshToken, { secure: isSecure, sameSite: 'lax', expires: 7 });
 }
 
 export function clearAuth() {
