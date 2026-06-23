@@ -16,7 +16,7 @@ from sqlalchemy.exc import MultipleResultsFound
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.models import Scan, Finding, Report, User, ScanStatus
-from app.services.report_generator import generate_pdf_report
+from app.services.report_generator_v2 import generate_pdf_report
 
 logger = logging.getLogger(__name__)
 
