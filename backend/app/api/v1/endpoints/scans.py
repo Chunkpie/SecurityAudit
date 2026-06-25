@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi import WebSocket, WebSocketDisconnect
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.models import Scan, ScanStatus, Finding, Organization, OrganizationMember, UserRole, User
@@ -176,3 +177,39 @@ async def get_scan_summary(
             "info": severity_counts.get("info", 0),
         },
     }
+
+
+@router.websocket("/{scan_id}/ws")
+async def scan_websocket(websocket: WebSocket, scan_id: UUID):
+    await websocket.accept()
+    try:
+        from app.core.redis import redis_client
+        pubsub = redis_client.pubsub()
+        await pubsub.subscribe(f"scan:{scan_id}:logs")
+
+        while True:
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=True, timeout=1.0
+            )
+            if message:
+                await websocket.send_json({
+                    "type": "log",
+                    "data": message["data"].decode() if isinstance(
+                        message["data"], bytes
+                    ) else message["data"],
+                })
+
+            try:
+                await websocket.send_json({"type": "ping"})
+            except Exception:
+                break
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for scan {scan_id}")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+    finally:
+        try:
+            await redis_client.pubsub().unsubscribe(f"scan:{scan_id}:logs")
+        except Exception:
+            pass

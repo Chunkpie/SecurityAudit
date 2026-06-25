@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import auth, scans, findings, reports, organizations, users, webhooks, cicd
+from app.core.oauth import oauth_router
 
 router = APIRouter()
 
@@ -12,3 +13,4 @@ router.include_router(findings.router, prefix="/findings", tags=["Findings"])
 router.include_router(reports.router, prefix="/reports", tags=["Reports"])
 router.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
 router.include_router(cicd.router, prefix="/cicd", tags=["CI/CD"])
+router.include_router(oauth_router, tags=["oauth"])

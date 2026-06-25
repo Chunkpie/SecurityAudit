@@ -62,6 +62,8 @@ class OrganizationCreate(BaseModel):
     name: str
     slug: str
     description: Optional[str] = None
+    webhook_url: Optional[str] = None
+    webhook_channel: str = "generic"
 
     @field_validator("slug")
     @classmethod
@@ -80,6 +82,8 @@ class OrganizationResponse(BaseModel):
     slug: str
     description: Optional[str] = None
     plan: str
+    webhook_url: Optional[str] = None
+    webhook_channel: str = "generic"
     created_at: datetime
 
 

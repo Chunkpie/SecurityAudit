@@ -14,6 +14,8 @@ const SCAN_TYPES: { value: ScanType; label: string; desc: string; duration: stri
   { value: 'tls', label: 'TLS / SSL Only', desc: 'Deep TLS analysis: protocols, ciphers, certificate chain, HSTS', duration: '1–3 min' },
   { value: 'headers', label: 'Headers Only', desc: 'Security headers, CORS policy, server version disclosure', duration: '< 1 min' },
   { value: 'vulnerabilities', label: 'Vulnerability Scan', desc: 'Nuclei templates, SQLi, XSS, injection vectors', duration: '5–10 min' },
+  { value: 'cms', label: 'CMS Scan', desc: 'WordPress/Drupal/Joomla version, plugins, themes, and known vulns', duration: '3-8 min' },
+  { value: 'subdomain', label: 'Subdomain Discovery', desc: 'Enumerate subdomains via passive OSINT sources', duration: '1-2 min' },
 ];
 
 export default function NewScanPage() {

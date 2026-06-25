@@ -11,8 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlmap \
     gobuster \
     dirb \
+    whatweb \
     chromium \
     chromium-driver \
+    ruby \
+    ruby-dev \
+    build-essential \
+    && gem install wpscan \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Nuclei

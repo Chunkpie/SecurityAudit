@@ -39,6 +39,8 @@ class ScanType(str, enum.Enum):
     HEADERS = "headers"
     VULNERABILITIES = "vulnerabilities"
     SOURCE_CODE = "source_code"
+    CMS = "cms"
+    SUBDOMAIN = "subdomain"
 
 
 class FindingSeverity(str, enum.Enum):
@@ -92,6 +94,8 @@ class Organization(Base):
     plan: Mapped[str] = mapped_column(String(50), default="free")
     max_scans_per_month: Mapped[int] = mapped_column(Integer, default=10)
     logo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    webhook_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    webhook_channel: Mapped[str] = mapped_column(String(20), default="generic")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -220,6 +224,7 @@ class Finding(Base):
     verification_steps: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cve_ids: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     cvss_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)
     risk_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     affected_url: Mapped[Optional[str]] = mapped_column(String(2048), nullable=True)
     parameter: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
@@ -274,6 +279,42 @@ class ApiKey(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     user: Mapped["User"] = relationship(back_populates="api_keys")
+
+
+class SuppressionRule(Base):
+    __tablename__ = "suppression_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    rule_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    pattern: Mapped[str] = mapped_column(String(1000), nullable=False)
+    finding_title_pattern: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    severity: Mapped[str] = mapped_column(String(20), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("idx_suppression_org", "organization_id"),
+    )
+
+
+class ScanBaseline(Base):
+    __tablename__ = "scan_baselines"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    target_domain: Mapped[str] = mapped_column(String(255), nullable=False)
+    total_scans: Mapped[int] = mapped_column(Integer, default=0)
+    noise_findings: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    accepted_findings: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    last_updated: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "target_domain", name="uq_baseline_org_domain"),
+    )
 
 
 class AuditLog(Base):

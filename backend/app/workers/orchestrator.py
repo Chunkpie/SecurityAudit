@@ -17,6 +17,9 @@ from app.workers.scanners.nmap_scanner import NmapScanner
 from app.workers.scanners.ssl_scanner import SSLScanner
 from app.workers.scanners.injection_scanner import InjectionScanner
 from app.workers.scanners.directory_scanner import DirectoryScanner
+from app.workers.scanners.wpscan_scanner import WPScanScanner
+from app.workers.scanners.whatweb_scanner import WhatWebScanner
+from app.workers.scanners.subfinder_scanner import SubfinderScanner
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +44,33 @@ class ScanOrchestrator:
         tasks = [self._run_scanner(scanner) for scanner in scanners]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
+        raw_findings = []
         for result in results:
             if isinstance(result, Exception):
                 logger.error(f"Scanner error: {result}")
             elif isinstance(result, list):
-                self.findings.extend(result)
+                raw_findings.extend(result)
+
+        from app.workers.scanners.correlator import correlate_findings
+        from app.workers.scanners.suppression import apply_suppression_rules
+
+        self.findings = correlate_findings(raw_findings)
+
+        suppress_enabled = self.scan_config.get("enable_suppression", False)
+        if suppress_enabled:
+            from app.workers.scanners.suppression import SuppressionRule
+            rules = _load_default_suppression_rules()
+            self.findings = apply_suppression_rules(self.findings, rules)
+
+        validate_enabled = self.scan_config.get("enable_validation", False)
+        if validate_enabled:
+            from app.workers.scanners.validator import validate_finding
+            validated = []
+            for f in self.findings:
+                result = await validate_finding(f)
+                if result is not None:
+                    validated.append(result)
+            self.findings = validated
 
         score = self._calculate_score()
         verdict = self._determine_verdict(score)
@@ -53,6 +78,7 @@ class ScanOrchestrator:
         duration = time.time() - self.start_time
         self.metadata["scan_duration_seconds"] = round(duration, 2)
         self.metadata["total_findings"] = len(self.findings)
+        self.metadata["raw_findings_before_correlation"] = len(raw_findings)
         self.metadata["scan_type"] = self.scan_type
 
         return {
@@ -73,6 +99,10 @@ class ScanOrchestrator:
             return [TLSScanner(self.target_url), SSLScanner(self.target_url)]
         elif self.scan_type == "headers":
             return [HeaderScanner(self.target_url)]
+        elif self.scan_type == "cms":
+            return [WPScanScanner(self.target_url), WhatWebScanner(self.target_url)]
+        elif self.scan_type == "subdomain":
+            return [SubfinderScanner(self.target_url)]
         else:  # full
             scanners = [
                 HeaderScanner(self.target_url),
@@ -80,6 +110,9 @@ class ScanOrchestrator:
                 ExposureScanner(self.target_url),
                 NmapScanner(self.domain),
                 DirectoryScanner(self.target_url),
+                WPScanScanner(self.target_url),
+                WhatWebScanner(self.target_url),
+                SubfinderScanner(self.target_url),
             ]
             if self.scan_config.get("enable_nuclei", True):
                 scanners.append(NucleiScanner(self.target_url))
@@ -106,6 +139,9 @@ class ScanOrchestrator:
         score = 100.0
         counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
         for f in self.findings:
+            status = f.get("correlation_status", "confirmed")
+            if status == "suppressed":
+                continue
             sev = f.get("severity", "info")
             if sev in counts:
                 counts[sev] += 1
@@ -128,3 +164,11 @@ class ScanOrchestrator:
             return "GO_WITH_CONDITIONS"
         else:
             return "GO"
+
+
+def _load_default_suppression_rules():
+    from app.workers.scanners.suppression import SuppressionRule
+    return [
+        SuppressionRule("path", r"\.(jpg|png|gif|svg|ico|css|js)$"),
+        SuppressionRule("finding_id", r"CVE-2023-\d{4,}", severity="info"),
+    ]

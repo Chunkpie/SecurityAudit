@@ -13,6 +13,7 @@ import {
   severityColor, formatDate, formatDuration, cn
 } from '@/lib/utils';
 import type { Finding, ScanStatus, DeploymentVerdict } from '@/types';
+import { useScanSocket } from '@/lib/useScanSocket';
 import Link from 'next/link';
 import { RadialBarChart, RadialBar, PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -49,6 +50,7 @@ export default function ScanDetailPage() {
   const isRunning = ['pending', 'queued', 'running'].includes(scan?.status || '');
   const isComplete = scan?.status === 'completed';
   const findings: Finding[] = findingsData?.items || [];
+  const { logs, connected: wsConnected } = useScanSocket(isRunning ? id : undefined);
 
   const pieData = summary
     ? [
@@ -155,6 +157,22 @@ export default function ScanDetailPage() {
         </div>
       )}
 
+      {/* Live Logs */}
+      {isRunning && logs.length > 0 && (
+        <div className="bg-black text-green-400 border border-green-800 rounded-xl p-4 mb-6 font-mono text-xs max-h-48 overflow-y-auto">
+          <div className="flex items-center gap-2 mb-2 text-green-300 text-xs font-sans">
+            <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-400' : 'bg-yellow-400'}`} />
+            Live Scan Logs {wsConnected ? '(connected)' : '(reconnecting...)'}
+          </div>
+          {logs.map((log, i) => (
+            <div key={i} className="opacity-80 hover:opacity-100">
+              <span className="text-gray-600 mr-2">[{i + 1}]</span>
+              {log}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Failed state */}
       {scan.status === 'failed' && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 mb-6">
@@ -217,6 +235,14 @@ export default function ScanDetailPage() {
             </div>
           </div>
 
+          {scan.scan_metadata?.raw_findings_before_correlation && (
+            <div className="col-span-3 bg-white border border-gray-200 rounded-xl p-3 text-center text-xs text-gray-500 mb-6">
+              Raw findings before correlation: {scan.scan_metadata.raw_findings_before_correlation} |
+              Final findings: {findings.length} |
+              Reduction: {Math.round((1 - findings.length / (scan.scan_metadata.raw_findings_before_correlation as number)) * 100)}%
+            </div>
+          )}
+
           {/* Findings list */}
           <div className="bg-white border border-gray-200 rounded-xl">
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
@@ -244,6 +270,23 @@ export default function ScanDetailPage() {
                       {f.affected_url && (
                         <p className="text-xs text-blue-500 font-mono mt-1 truncate">{f.affected_url}</p>
                       )}
+                      <div className="flex items-center gap-2 mt-1">
+                        {f.confidence !== undefined && f.confidence !== null && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            f.confidence >= 0.7 ? 'bg-green-100 text-green-700' :
+                            f.confidence >= 0.4 ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-gray-100 text-gray-500'
+                          }`}>
+                            {(f.confidence * 100).toFixed(0)}% confidence
+                          </span>
+                        )}
+                        {f.correlation_status === 'suspicious' && (
+                          <span className="text-xs text-yellow-600 bg-yellow-50 px-1.5 py-0.5 rounded">Suspicious</span>
+                        )}
+                        {f.correlation_status === 'suppressed' && (
+                          <span className="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded line-through">Suppressed</span>
+                        )}
+                      </div>
                     </div>
                     {f.cvss_score && (
                       <span className="text-xs text-gray-400 shrink-0">CVSS: {f.cvss_score}</span>

@@ -102,6 +102,14 @@ class Settings(BaseSettings):
     ENABLE_SOURCE_CODE_SCAN: bool = True
     ENABLE_SCHEDULED_SCANS: bool = True
 
+    # False Positive Reduction
+    ENABLE_FINDING_CORRELATION: bool = True
+    ENABLE_FINDING_SUPPRESSION: bool = False
+    ENABLE_FINDING_VALIDATION: bool = False
+    CORRELATION_MIN_SOURCES: int = 2
+    CONFIDENCE_CONFIRMED_THRESHOLD: float = 0.7
+    CONFIDENCE_SUSPICIOUS_THRESHOLD: float = 0.4
+
     @model_validator(mode="after")
     def validate_celery_settings(self):
         if self.CELERY_BROKER_URL is None:

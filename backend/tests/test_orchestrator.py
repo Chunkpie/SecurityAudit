@@ -72,3 +72,38 @@ class TestDomainExtraction:
     def test_extracts_domain_with_port(self):
         orchestrator = ScanOrchestrator("https://example.com:8443/path")
         assert orchestrator.domain == "example.com"
+
+
+class TestWPScanScanner:
+    def test_wpscan_imports(self):
+        from app.workers.scanners.wpscan_scanner import WPScanScanner
+        scanner = WPScanScanner("https://example.com")
+        assert scanner.target == "https://example.com"
+        assert hasattr(scanner, "scan")
+
+    def test_wpscan_parse_version_missing(self):
+        from app.workers.scanners.wpscan_scanner import WPScanScanner
+        scanner = WPScanScanner("https://example.com")
+        findings = scanner._parse_version({})
+        assert len(findings) == 1
+        assert findings[0]["title"] == "WordPress Version Not Detected"
+
+
+class TestWhatWebScanner:
+    def test_whatweb_imports(self):
+        from app.workers.scanners.whatweb_scanner import WhatWebScanner
+        scanner = WhatWebScanner("https://example.com")
+        assert scanner.target == "https://example.com"
+
+    def test_whatweb_parse_no_output(self):
+        from app.workers.scanners.whatweb_scanner import WhatWebScanner
+        scanner = WhatWebScanner("https://example.com")
+        findings = scanner._parse_output("")
+        assert len(findings) == 0
+
+
+class TestSubfinderScanner:
+    def test_subfinder_imports(self):
+        from app.workers.scanners.subfinder_scanner import SubfinderScanner
+        scanner = SubfinderScanner("https://example.com")
+        assert scanner.target == "https://example.com"

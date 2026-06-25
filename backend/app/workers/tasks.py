@@ -37,8 +37,17 @@ celery_app.conf.update(
     task_routes={
         "app.workers.tasks.run_scan_task": {"queue": "scans"},
         "app.workers.tasks.generate_report_task": {"queue": "reports"},
+        "app.workers.beat_tasks.*": {"queue": "maintenance"},
     },
 )
+
+celery_app.conf.beat_schedule = {
+    "update-scan-baselines": {
+        "task": "app.workers.beat_tasks.update_scan_baselines",
+        "schedule": 86400.0,
+        "options": {"queue": "maintenance"},
+    },
+}
 
 
 def get_sync_db():
@@ -84,6 +93,14 @@ def run_scan_task(self, scan_id: str):
 
         # Store findings
         for finding_data in result["findings"]:
+            correlation_status = finding_data.get("correlation_status", "confirmed")
+            if correlation_status == "suspicious":
+                is_false_positive_default = False
+            elif correlation_status == "suppressed":
+                is_false_positive_default = True
+            else:
+                is_false_positive_default = False
+
             finding = Finding(
                 scan_id=scan_id,
                 title=finding_data["title"],
@@ -99,6 +116,8 @@ def run_scan_task(self, scan_id: str):
                 verification_steps=finding_data.get("verification_steps"),
                 cve_ids=finding_data.get("cve_ids", []),
                 cvss_score=finding_data.get("cvss_score"),
+                confidence=finding_data.get("confidence"),
+                is_false_positive=is_false_positive_default,
             )
             db.add(finding)
 

@@ -1,5 +1,5 @@
 export type ScanStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type ScanType = 'full' | 'quick' | 'tls' | 'headers' | 'vulnerabilities' | 'source_code';
+export type ScanType = 'full' | 'quick' | 'tls' | 'headers' | 'vulnerabilities' | 'source_code' | 'cms' | 'subdomain';
 export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 export type DeploymentVerdict = 'GO' | 'GO_WITH_CONDITIONS' | 'NO_GO';
 export type UserRole = 'owner' | 'admin' | 'member' | 'viewer';
@@ -23,6 +23,13 @@ export interface Organization {
   created_at: string;
 }
 
+export interface ScanMetadata extends Record<string, unknown> {
+  scan_duration_seconds?: number;
+  total_findings?: number;
+  raw_findings_before_correlation?: number;
+  scan_type?: string;
+}
+
 export interface Scan {
   id: string;
   target_url: string;
@@ -31,7 +38,7 @@ export interface Scan {
   status: ScanStatus;
   security_score?: number;
   verdict?: DeploymentVerdict;
-  scan_metadata?: Record<string, unknown>;
+  scan_metadata?: ScanMetadata;
   error_message?: string;
   started_at?: string;
   completed_at?: string;
@@ -53,6 +60,8 @@ export interface Finding {
   verification_steps?: string;
   cve_ids?: string[];
   cvss_score?: number;
+  confidence?: number;
+  correlation_status?: 'confirmed' | 'suspicious' | 'suppressed';
   risk_score?: number;
   affected_url?: string;
   tool_name?: string;
