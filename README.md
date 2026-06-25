@@ -1,200 +1,171 @@
-# SecAudit — Website Deployment Readiness & Security Audit Platform
+# SecAudit
 
-A production-ready platform that determines whether a website is secure enough to deploy or
-continue operating in production. Scans run **without requiring any paid AI APIs** — the entire
-scanning, scoring, and reporting pipeline operates on $0/scan using open-source security tools.
+A self-hosted platform that answers one question before you ship: **is this thing actually safe to put in production, or are we about to find out the hard way?**
 
-> **Verdict system:** Every scan produces a clear **GO** / **GO WITH CONDITIONS** / **NO-GO**
-> deployment recommendation backed by a 0–100 security score and detailed, evidence-backed findings.
+You point it at a target, it runs a real scanning pipeline (Nmap, Nuclei, SQLMap, FFUF/Gobuster, SSLyze/testssl.sh, plus a bunch of custom checks), scores the result 0–100, and spits out a deployment verdict: **GO**, **GO WITH CONDITIONS**, or **NO-GO**. No paid AI API calls anywhere in the pipeline. $0/scan, every time, using open-source tooling you'd otherwise be running by hand in five different terminal tabs.
 
----
-
-## ✨ Features
-
-- 🔍 **Multi-tool scan orchestration** — Nmap, Nuclei, SQLMap, FFUF/Gobuster, SSLyze/testssl.sh, and custom checks
-- 🛡️ **10+ audit categories** — TLS/HTTPS, auth, sensitive data exposure, injection, XSS, access control, CSRF, clickjacking, server hardening, cloud security
-- 📊 **Weighted risk scoring** with deterministic GO/GO-WITH-CONDITIONS/NO-GO verdicts
-- 📄 **Downloadable reports** — PDF (via Playwright), JSON, and CSV with full evidence and remediation guidance
-- 🏢 **Multi-tenant** organizations with role-based access control (Owner/Admin/Member/Viewer)
-- ⚡ **Async scan orchestration** via Celery + Redis with live status polling
-- 🔄 **CI/CD security gates** — GitHub Actions, GitLab CI, and Jenkins templates that block deployments on failing audits
-- 📈 **Prometheus + Grafana** monitoring out of the box
-- 🔐 **JWT auth** with refresh tokens, audit logging, and consent tracking on every scan
-- 🤖 **Optional local AI** (Ollama) — never required, the platform is 100% functional without it
+I built this because I got tired of doing the same manual recon → scan → triage → write-up loop for every app/site I was asked to look at, and wanted something that gates CI/CD the way a senior pentester gates a release — refuses to sign off until the findings say it's fine.
 
 ---
 
-## 🏗️ Architecture
+## What it actually does
 
-```
-┌─────────────┐      ┌──────────────┐      ┌─────────────────┐
-│   Next.js   │─────▶│   FastAPI    │─────▶│   PostgreSQL     │
-│  Frontend   │◀─────│   Backend    │◀─────│   (scans, etc.)  │
-└─────────────┘      └──────┬───────┘      └─────────────────┘
-                             │
-                             ▼
-                      ┌──────────────┐      ┌─────────────────┐
-                      │ Celery Queue │─────▶│      Redis       │
-                      │   (Scans)    │◀─────│  (broker/cache)  │
-                      └──────┬───────┘      └─────────────────┘
-                             │
-                             ▼
-              ┌──────────────────────────────┐
-              │      Celery Worker Pool       │
-              │  Nmap · Nuclei · SQLMap · ... │
-              └──────────────────────────────┘
-```
-
-All services run behind an **Nginx** reverse proxy with rate limiting and security headers.
-**Prometheus** scrapes metrics; **Grafana** visualizes them.
+- Orchestrates a real multi-tool scan: TLS/cert hygiene, auth weaknesses, sensitive data exposure, injection (SQLi via SQLMap), XSS, broken access control, CSRF, clickjacking, server/header hardening, basic cloud misconfig checks
+- Turns raw tool output into a weighted risk score instead of a wall of unreadable logs
+- Produces a deterministic verdict — same findings always produce the same verdict, no vibes-based scoring
+- Generates PDF/JSON/CSV reports with evidence and remediation steps you can actually hand to a dev team
+- Gates deployments in GitHub Actions / GitLab CI / Jenkins — fail the audit, fail the pipeline
+- Multi-tenant with proper RBAC (Owner/Admin/Member/Viewer), JWT auth, audit logging, consent tracking on every single scan
+- Async scan execution via Celery + Redis so you're not blocking on a 10-minute Nmap run
+- Prometheus + Grafana wired in out of the box because if you can't see it, you can't trust it
+- Optional local AI via Ollama for remediation summaries — fully optional, the core platform doesn't need it and never will
 
 ---
 
-## 📦 Tech Stack
+## Stack
 
-| Layer | Technology |
+| Layer | Tech |
 |---|---|
-| Frontend | Next.js 15, TypeScript, Tailwind CSS, TanStack Query, Recharts, Zustand |
+| Frontend | Next.js 15, TypeScript, Tailwind, TanStack Query, Recharts, Zustand |
 | Backend | FastAPI, Python 3.12, SQLAlchemy 2.0 (async), Pydantic v2 |
-| Database | PostgreSQL 16 |
-| Queue | Redis + Celery (workers + beat scheduler) |
-| Auth | JWT (access + refresh tokens), bcrypt password hashing |
+| DB | PostgreSQL 16 |
+| Queue | Redis + Celery (worker + beat) |
+| Auth | JWT (access + refresh), bcrypt |
 | Reports | Playwright (HTML→PDF), native JSON/CSV |
-| Scanning | Nmap, Nuclei, SQLMap, FFUF, Gobuster, SSLyze, testssl.sh |
+| Scanners | Nmap, Nuclei, SQLMap, FFUF, Gobuster, SSLyze, testssl.sh |
 | Infra | Docker Compose, Nginx, Prometheus, Grafana |
 
+```
+Next.js  ⇄  FastAPI  ⇄  PostgreSQL
+              │
+              ▼
+        Celery + Redis
+              │
+              ▼
+     Worker pool (Nmap · Nuclei · SQLMap · FFUF/Gobuster · SSLyze...)
+```
+
+Everything sits behind Nginx with rate limiting and security headers turned on by default, because a security tool with sloppy headers on its own frontend is a special kind of embarrassing.
+
 ---
 
-## 🚀 Quick Start (Docker Compose)
+## Before you touch anything: the rule
 
-### Prerequisites
-- Docker & Docker Compose v2
-- 4GB+ RAM recommended (scanning tools are resource-intensive)
+**Only scan things you own or have explicit written authorization to test.** Every scan logs consent, a timestamp, and the requesting IP into the audit trail — this isn't decorative, it's there because active scanning (SQLMap, Nuclei, Gobuster) against a target you don't control is a good way to get a very unpleasant phone call, or worse, a CFAA-flavored one. Read `TERMS_OF_SERVICE.md`. Don't be the reason this project gets a bad name.
 
-### 1. Clone and configure
+---
+
+## Getting it running (Docker — do this one)
+
+You need Docker + Docker Compose v2, and ideally 4GB+ RAM since the scanner stack is not lightweight.
 
 ```bash
 cd secaudit
 cp .env.example .env
 ```
 
-Edit `.env` and set strong values for `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `SECRET_KEY`, and
-`JWT_SECRET_KEY`. Generate secure secrets with:
+Open `.env` and actually change `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `SECRET_KEY`, and `JWT_SECRET_KEY`. Do not ship the example values, I will know.
 
 ```bash
 python3 -c "import secrets; print(secrets.token_urlsafe(64))"
 ```
+Run that four times, paste the outputs in. Takes ten seconds, saves you from being the example in someone's "how not to deploy" blog post.
 
-### 2. Build and start all services
+Bring everything up:
 
 ```bash
 docker compose up -d --build
 ```
 
-This starts: `postgres`, `redis`, `api`, `worker`, `beat`, `frontend`, `nginx`, `prometheus`, `grafana`.
+That spins up `postgres`, `redis`, `api`, `worker`, `beat`, `frontend`, `nginx`, `prometheus`, `grafana` — all of it, restart policies included.
 
-### 3. Run database migrations
+Migrate the DB:
 
 ```bash
 docker compose exec api alembic upgrade head
 ```
 
-### 4. Access the platform
+Then go in:
 
-| Service | URL |
+| Service | Where |
 |---|---|
-| Web App | http://localhost (via Nginx) or http://localhost:3000 directly |
-| API Docs | http://localhost:8000/api/docs |
-| Grafana | http://localhost:3001 (admin / value of `GRAFANA_PASSWORD`) |
-| Prometheus | http://localhost:9090 |
+| App | `http://localhost` (Nginx) or `http://localhost:3000` direct |
+| API docs | `http://localhost:8000/api/docs` |
+| Grafana | `http://localhost:3001` — login `admin` / your `GRAFANA_PASSWORD` |
+| Prometheus | `http://localhost:9090` |
 
-Register an account, create an organization, and launch your first scan.
+Register, spin up an org, launch your first scan against something you're allowed to hit.
 
 ---
 
-## 🛠️ Development Setup (without Docker)
+## Running it bare-metal (no Docker)
 
-### Backend
+If you want to actually understand what's happening under the hood, or you're on a box where Docker isn't an option, here's the manual path.
+
+**Backend:**
 
 ```bash
 cd backend
 python3.12 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+```
 
-# Install scanning tools locally (Ubuntu/Debian example)
+Get the scanning tools installed locally:
+
+```bash
 sudo apt-get install nmap sqlmap gobuster
-# Nuclei: https://github.com/projectdiscovery/nuclei#install
-# FFUF: https://github.com/ffuf/ffuf#installation
 pip install sslyze
 playwright install chromium
+```
 
-cp .env.example .env   # configure POSTGRES_*, REDIS_* for local services
+Nuclei and FFUF aren't in apt by default — grab them from their respective repos:
+- Nuclei: https://github.com/projectdiscovery/nuclei#install
+- FFUF: https://github.com/ffuf/ffuf#installation
+
+Then:
+
+```bash
+cp .env.example .env   # point at your local Postgres/Redis
 alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
-In a separate terminal, start the Celery worker:
+Separate terminal — the worker (this is where the actual scanning happens, don't forget it or your scans will queue forever and you'll be debugging the wrong thing for 20 minutes like I did):
 
 ```bash
 celery -A app.workers.tasks.celery_app worker --loglevel=info -Q scans,reports
 ```
 
-And the beat scheduler (for scheduled scans):
+And if you want scheduled/recurring scans, the beat scheduler too:
 
 ```bash
 celery -A app.workers.tasks.celery_app beat --loglevel=info
 ```
 
-### Frontend
+**Frontend:**
 
 ```bash
 cd frontend
 npm install --legacy-peer-deps
-cp .env.example .env.local   # set NEXT_PUBLIC_API_URL=http://localhost:8000
+cp .env.example .env.local   # NEXT_PUBLIC_API_URL=http://localhost:8000
 npm run dev
 ```
 
-Visit http://localhost:3000.
+`http://localhost:3000`. Done.
 
 ---
 
-## 🏭 Production Deployment
+## Wiring it into CI/CD
 
-1. **Provision a VPS** (see sizing recommendations below).
-2. **Set up DNS** pointing to your server.
-3. **Obtain TLS certificates** (Let's Encrypt via certbot) and mount them into
-   `infrastructure/nginx/conf.d` — uncomment the HTTPS server block in `default.conf`.
-4. **Set strong secrets** in `.env` — never reuse the example values.
-5. **Run with restart policies**: `docker compose up -d` (all services use `restart: unless-stopped`).
-6. **Set up automated backups** for the `postgres_data` volume.
-7. **Configure firewall** to only expose ports 80/443 publicly; keep 5432, 6379, 9090 internal.
-8. **Enable scheduled scan cleanup** — old reports can be pruned via a cron job against `/app/reports`.
+The actual point of this tool, IMO — let the pipeline kill the deploy if the audit comes back bad, instead of someone eyeballing a PDF at 5pm on a Friday and shipping anyway.
 
-### Recommended VPS sizing
+Templates live in:
+- `.github/workflows/security-gate-template.yml`
+- `scripts/gitlab-ci-template.yml`
+- `scripts/Jenkinsfile.template`
 
-| Tier | Specs | Concurrent Scans |
-|---|---|---|
-| Starter | 2 vCPU / 4GB RAM | 1–2 |
-| Standard | 4 vCPU / 8GB RAM | 3–5 |
-| Scale | 8 vCPU / 16GB RAM + dedicated worker nodes | 10+ |
-
-Scanning tools (Nmap, SQLMap, Nuclei) are CPU and network-bound; scale worker replicas
-horizontally (`docker compose up -d --scale worker=3`) for higher throughput.
-
----
-
-## 🔌 CI/CD Integration
-
-Block deployments automatically when a scan returns `NO_GO`. Templates are provided in:
-
-- `.github/workflows/security-gate-template.yml` (GitHub Actions)
-- `scripts/gitlab-ci-template.yml` (GitLab CI)
-- `scripts/Jenkinsfile.template` (Jenkins)
-
-Copy the relevant template into your **own project's** CI configuration, set the required
-secrets (`SECAUDIT_API_URL`, `SECAUDIT_API_KEY`, `SECAUDIT_ORG_ID`, `STAGING_URL`), and deployments
-will be gated on the `/api/v1/cicd/gate/{scan_id}` endpoint, which returns:
+Drop the relevant one into your own repo's CI config, set `SECAUDIT_API_URL`, `SECAUDIT_API_KEY`, `SECAUDIT_ORG_ID`, `STAGING_URL` as secrets, and your pipeline now hits `/api/v1/cicd/gate/{scan_id}`, which returns exactly what you need to fail the build:
 
 ```json
 {
@@ -206,12 +177,13 @@ will be gated on the `/api/v1/cicd/gate/{scan_id}` endpoint, which returns:
 }
 ```
 
+`passed: false` → fail the job. That's it. No interpretation needed, which is the whole point of a deterministic scorer.
+
 ---
 
-## 🤖 Optional Local AI (Ollama)
+## Local AI (optional, genuinely optional)
 
-The platform never requires AI to function. If you want AI-assisted remediation summaries,
-set in `.env`:
+If you want plain-English remediation summaries on top of the raw findings, point it at a local Ollama instance:
 
 ```
 OLLAMA_ENABLED=true
@@ -219,68 +191,81 @@ OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=llama3
 ```
 
-This is purely additive — all scanning, scoring, and reporting work identically with or without it.
+Turn this off and nothing breaks. Scoring, scanning, and reporting don't depend on it — it's a nice-to-have layer for summarizing what the scanners already found, not a dependency.
 
 ---
 
-## 🗺️ Roadmap
-
-**Phase 1 (MVP — included in this repo)**
-Core scanning engine, auth, multi-tenant orgs, PDF/JSON/CSV reports, dashboard UI, CI/CD gates.
-
-**Phase 2 (Public Beta)**
-Subdomain auto-discovery (Subfinder/Amass), source code scanning (Semgrep/Trivy/Gitleaks),
-scheduled scan comparison reports, webhook notifications, screenshot evidence capture.
-
-**Phase 3 (Commercial)**
-Team billing/subscriptions, white-label reports, SSO/SAML, compliance mapping (PCI-DSS/SOC2),
-dedicated scan infrastructure per tenant.
-
----
-
-## ⚖️ Legal
-
-See [`TERMS_OF_SERVICE.md`](./TERMS_OF_SERVICE.md). **Users must only scan assets they own or
-are explicitly authorized to test.** Every scan records consent, timestamp, and IP address to
-the audit trail.
-
----
-
-## 📁 Repository Structure
+## Repo layout
 
 ```
 secaudit/
-├── backend/                  # FastAPI application
+├── backend/
 │   ├── app/
-│   │   ├── api/v1/endpoints/ # REST API route handlers
-│   │   ├── core/             # Config, security, database, redis
-│   │   ├── models/           # SQLAlchemy ORM models
-│   │   ├── schemas/          # Pydantic request/response schemas
-│   │   ├── services/         # Report generation, business logic
+│   │   ├── api/v1/endpoints/   # route handlers
+│   │   ├── core/               # config, security, db, redis
+│   │   ├── models/             # SQLAlchemy ORM
+│   │   ├── schemas/            # Pydantic schemas
+│   │   ├── services/           # report gen + business logic
 │   │   └── workers/
-│   │       ├── scanners/     # Individual scanner modules (TLS, headers, nmap, etc.)
-│   │       ├── orchestrator.py  # Coordinates all scanners, computes score/verdict
-│   │       └── tasks.py      # Celery task definitions
-│   ├── migrations/           # Alembic database migrations
-│   ├── tests/                # Pytest test suite
-│   ├── Dockerfile            # API server image
-│   └── Dockerfile.worker     # Worker image (includes all scanning tools)
-├── frontend/                  # Next.js application
+│   │       ├── scanners/       # one module per scanner (tls, headers, nmap...)
+│   │       ├── orchestrator.py # runs scanners, computes score + verdict
+│   │       └── tasks.py        # Celery task defs
+│   ├── migrations/             # Alembic
+│   ├── tests/
+│   ├── Dockerfile
+│   └── Dockerfile.worker       # bundles all scanning tools
+├── frontend/
 │   └── src/
-│       ├── app/               # App Router pages (dashboard, auth, scans, findings...)
+│       ├── app/                # App Router pages
 │       ├── lib/                # API client, utils, Zustand store
-│       └── types/              # Shared TypeScript types
+│       └── types/
 ├── infrastructure/
-│   ├── nginx/                 # Reverse proxy config
-│   └── monitoring/            # Prometheus + Grafana provisioning
-├── .github/workflows/         # CI pipelines + reusable security gate template
-├── scripts/                   # GitLab CI / Jenkins templates, DB init
+│   ├── nginx/
+│   └── monitoring/             # Prometheus + Grafana provisioning
+├── .github/workflows/
+├── scripts/                    # GitLab/Jenkins templates, DB init
 ├── docker-compose.yml
 └── TERMS_OF_SERVICE.md
 ```
 
-## Ownership
 
-```
-Dont forget to give a Star Made By Feizan
-```
+## A few notes from actually running this
+
+- The worker image is heavier than the API image because it bundles every scanning tool — don't be surprised by the build time on first `docker compose up --build`.
+- If a scan looks stuck, check the worker logs before anything else (`docker compose logs -f worker`). 90% of the time it's a queue not being consumed, not an actual scan hang.
+- SQLMap and Nuclei runs can be loud on the target's logs — if you're testing your own staging environment, expect your WAF/IDS to light up. That's expected, not a bug.
+- The verdict thresholds are intentionally conservative. If you think NO-GO is being too aggressive for your risk appetite, that's a config change in the orchestrator, not a reason to ignore the gate.
+
+---
+
+## Contributing
+
+PRs welcome, especially on the scanner modules and verdict scoring logic — that's the part most likely to have edge cases I haven't hit yet.
+
+Before opening a PR:
+
+1. Fork it, branch off `main` with something descriptive (`fix/sqlmap-timeout-handling`, not `patch-1`).
+2. If you're touching `orchestrator.py` or anything in `workers/scanners/`, add/update tests in `backend/tests/` — scoring logic without tests is just vibes, and we said no to vibes-based scoring up top.
+3. Run the existing suite before you push:
+   ```bash
+   cd backend
+   pytest
+   ```
+4. Keep PRs scoped to one thing. A new scanner module and a frontend refactor in the same PR is a pain for both of us to review.
+5. If you're adding a new scanner integration, follow the existing pattern in `workers/scanners/` — same input/output shape so the orchestrator doesn't need special-casing.
+
+**Good first issues:** new check categories under `workers/scanners/`, additional CI templates (Circle CI, Drone, etc.), report formatting improvements, Grafana dashboard tweaks.
+
+**Things to talk through in an issue first before sending a PR:** anything touching auth/JWT logic, the consent/audit-logging flow, or the verdict scoring weights — these are the parts where a "small" change can quietly turn a NO-GO into a GO and nobody notices until it matters.
+
+Found a bug instead of a feature? Open an issue with the target type (don't paste real scan output from someone else's site), steps to reproduce, and what you expected vs. what happened.
+
+---
+
+## License & legal
+
+See `TERMS_OF_SERVICE.md`. Scan responsibly — authorization isn't optional, it's the entire legal basis for this tool existing.
+
+---
+
+⭐ if this saved you from a bad deploy. Built by **Feizan**.
